@@ -1,0 +1,891 @@
+{
+	"info": {
+		"_postman_id": "material-inventory-api-collection",
+		"name": "Material Inventory Management API",
+		"description": "Multi-tenant REST API for managing material inventory with user management, transaction tracking, and plan-based limits.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health & Setup",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Check API status and availability"
+					},
+					"response": []
+				},
+				{
+					"name": "Create FREE Tenant",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('tenant_free_id', jsonData.data.id);",
+									"    pm.test('Tenant created successfully', function () {",
+									"        pm.expect(jsonData.data.plan).to.eql('FREE');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Acme Corp (FREE)\",\n  \"plan\": \"FREE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/tenants",
+							"host": ["{{base_url}}"],
+							"path": ["tenants"]
+						},
+						"description": "Create a new tenant with FREE plan (max 5 materials)"
+					},
+					"response": []
+				},
+				{
+					"name": "Create PRO Tenant",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('tenant_pro_id', jsonData.data.id);",
+									"    pm.test('PRO Tenant created', function () {",
+									"        pm.expect(jsonData.data.plan).to.eql('PRO');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"TechStart Inc (PRO)\",\n  \"plan\": \"PRO\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/tenants",
+							"host": ["{{base_url}}"],
+							"path": ["tenants"]
+						},
+						"description": "Create a new tenant with PRO plan (unlimited materials)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Tenant by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/tenants/{{tenant_free_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["tenants", "{{tenant_free_id}}"]
+						},
+						"description": "Retrieve tenant details by ID"
+					},
+					"response": []
+				}
+			],
+			"description": "Health check and tenant setup endpoints"
+		},
+		{
+			"name": "User Management",
+			"item": [
+				{
+					"name": "Create Admin User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('user_admin_id', jsonData.data.id);",
+									"    pm.test('Admin user created', function () {",
+									"        pm.expect(jsonData.data.role).to.eql('ADMIN');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin@acmecorp.com\",\n  \"name\": \"John Admin\",\n  \"role\": \"ADMIN\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["users"]
+						},
+						"description": "Create a new admin user for tenant"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Regular User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('user_regular_id', jsonData.data.id);",
+									"    pm.test('Regular user created', function () {",
+									"        pm.expect(jsonData.data.role).to.eql('USER');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"jane.doe@acmecorp.com\",\n  \"name\": \"Jane Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["users"]
+						},
+						"description": "Create a regular user (defaults to USER role)"
+					},
+					"response": []
+				},
+				{
+					"name": "List All Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["users"]
+						},
+						"description": "Get all users for the tenant"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/users/{{user_admin_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["users", "{{user_admin_id}}"]
+						},
+						"description": "Get specific user details by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Jane Doe Updated\",\n  \"role\": \"ADMIN\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/{{user_regular_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["users", "{{user_regular_id}}"]
+						},
+						"description": "Update user name and/or role"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/users/{{user_regular_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["users", "{{user_regular_id}}"]
+						},
+						"description": "Delete a user by ID"
+					},
+					"response": []
+				}
+			],
+			"description": "User CRUD operations (tenant-scoped)"
+		},
+		{
+			"name": "Material Management",
+			"item": [
+				{
+					"name": "Create Material - Steel Rods",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('material_steel_id', jsonData.data.id);",
+									"    pm.test('Material created', function () {",
+									"        pm.expect(jsonData.data.name).to.eql('Steel Rods');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Steel Rods\",\n  \"unit\": \"kg\",\n  \"currentStock\": 100\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials",
+							"host": ["{{base_url}}"],
+							"path": ["materials"]
+						},
+						"description": "Create a new material with initial stock"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Material - Aluminum Sheets",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('material_aluminum_id', jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Aluminum Sheets\",\n  \"unit\": \"pieces\",\n  \"currentStock\": 50\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials",
+							"host": ["{{base_url}}"],
+							"path": ["materials"]
+						},
+						"description": "Create another material"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Material - Copper Wire",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Copper Wire\",\n  \"unit\": \"meters\",\n  \"currentStock\": 500\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials",
+							"host": ["{{base_url}}"],
+							"path": ["materials"]
+						},
+						"description": "Create third material"
+					},
+					"response": []
+				},
+				{
+					"name": "List All Materials",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/materials",
+							"host": ["{{base_url}}"],
+							"path": ["materials"]
+						},
+						"description": "Get all materials for the tenant"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Material by ID (with transactions)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/materials/{{material_steel_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["materials", "{{material_steel_id}}"]
+						},
+						"description": "Get material details with transaction history"
+					},
+					"response": []
+				},
+				{
+					"name": "Test Plan Limit - 6th Material (Should Fail for FREE)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Plastic Tubes\",\n  \"unit\": \"pieces\",\n  \"currentStock\": 75\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials",
+							"host": ["{{base_url}}"],
+							"path": ["materials"]
+						},
+						"description": "Test FREE plan limit (should fail after 5 materials)"
+					},
+					"response": []
+				}
+			],
+			"description": "Material CRUD operations with plan limit testing"
+		},
+		{
+			"name": "Transaction Management",
+			"item": [
+				{
+					"name": "Add Stock (IN Transaction)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('transaction_in_id', jsonData.data.transaction.id);",
+									"    pm.test('Stock increased', function () {",
+									"        pm.expect(jsonData.data.transaction.type).to.eql('IN');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 50,\n  \"type\": \"IN\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials/{{material_steel_id}}/transactions",
+							"host": ["{{base_url}}"],
+							"path": ["materials", "{{material_steel_id}}", "transactions"]
+						},
+						"description": "Add 50 units to material stock (IN transaction)"
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Stock (OUT Transaction)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('transaction_out_id', jsonData.data.transaction.id);",
+									"    pm.test('Stock decreased', function () {",
+									"        pm.expect(jsonData.data.transaction.type).to.eql('OUT');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 30,\n  \"type\": \"OUT\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials/{{material_steel_id}}/transactions",
+							"host": ["{{base_url}}"],
+							"path": ["materials", "{{material_steel_id}}", "transactions"]
+						},
+						"description": "Remove 30 units from material stock (OUT transaction)"
+					},
+					"response": []
+				},
+				{
+					"name": "List All Transactions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/transactions",
+							"host": ["{{base_url}}"],
+							"path": ["transactions"]
+						},
+						"description": "Get all transactions across all materials for tenant"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transaction by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/transactions/{{transaction_in_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["transactions", "{{transaction_in_id}}"]
+						},
+						"description": "Get specific transaction details with material info"
+					},
+					"response": []
+				},
+				{
+					"name": "Test Insufficient Stock (Should Fail)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 999999,\n  \"type\": \"OUT\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials/{{material_steel_id}}/transactions",
+							"host": ["{{base_url}}"],
+							"path": ["materials", "{{material_steel_id}}", "transactions"]
+						},
+						"description": "Attempt to remove more stock than available (should fail with 400)"
+					},
+					"response": []
+				}
+			],
+			"description": "Stock transaction operations (IN/OUT)"
+		},
+		{
+			"name": "Multi-Tenant Isolation Tests",
+			"item": [
+				{
+					"name": "Cross-Tenant Material Access (Should Fail)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_pro_id}}",
+								"description": "Using PRO tenant to access FREE tenant's material"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/materials/{{material_steel_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["materials", "{{material_steel_id}}"]
+						},
+						"description": "Try to access another tenant's material (should return 404)"
+					},
+					"response": []
+				},
+				{
+					"name": "Cross-Tenant User Access (Should Fail)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_pro_id}}",
+								"description": "Using PRO tenant to access FREE tenant's user"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/users/{{user_admin_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["users", "{{user_admin_id}}"]
+						},
+						"description": "Try to access another tenant's user (should return 404)"
+					},
+					"response": []
+				},
+				{
+					"name": "Missing Tenant Header (Should Fail)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/materials",
+							"host": ["{{base_url}}"],
+							"path": ["materials"]
+						},
+						"description": "Request without x-tenant-id header (should return 401)"
+					},
+					"response": []
+				},
+				{
+					"name": "Invalid Tenant ID (Should Fail)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-tenant-id",
+								"value": "invalid-tenant-id-12345"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/materials",
+							"host": ["{{base_url}}"],
+							"path": ["materials"]
+						},
+						"description": "Request with non-existent tenant ID (should return 401)"
+					},
+					"response": []
+				}
+			],
+			"description": "Tests to verify tenant isolation and security"
+		},
+		{
+			"name": "Error Cases & Validation",
+			"item": [
+				{
+					"name": "Create User - Missing Required Fields",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["users"]
+						},
+						"description": "Missing 'name' field (should return 400)"
+					},
+					"response": []
+				},
+				{
+					"name": "Create User - Duplicate Email",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin@acmecorp.com\",\n  \"name\": \"Duplicate User\",\n  \"role\": \"USER\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["users"]
+						},
+						"description": "Email already exists globally (should return 400)"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Material - Invalid Role",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"newuser@test.com\",\n  \"name\": \"Test User\",\n  \"role\": \"SUPERADMIN\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["users"]
+						},
+						"description": "Invalid role value (should return 400)"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Transaction - Negative Quantity",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": -50,\n  \"type\": \"IN\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials/{{material_steel_id}}/transactions",
+							"host": ["{{base_url}}"],
+							"path": ["materials", "{{material_steel_id}}", "transactions"]
+						},
+						"description": "Negative quantity (should return 400)"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Transaction - Invalid Type",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-tenant-id",
+								"value": "{{tenant_free_id}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 50,\n  \"type\": \"TRANSFER\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/materials/{{material_steel_id}}/transactions",
+							"host": ["{{base_url}}"],
+							"path": ["materials", "{{material_steel_id}}", "transactions"]
+						},
+						"description": "Invalid transaction type (should return 400)"
+					},
+					"response": []
+				}
+			],
+			"description": "Validation and error handling test cases"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3001",
+			"type": "default"
+		}
+	]
+}

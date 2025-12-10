@@ -1,0 +1,84 @@
+// This is Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+model Tenant {
+  id           String        @id @default(uuid())
+  name         String
+  plan         Plan          @default(FREE)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  
+  users        User[]
+  materials    Material[]
+  transactions Transaction[]
+
+  @@map("tenants")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  email     String   @unique
+  name      String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Material {
+  id           String        @id @default(uuid())
+  tenantId     String        @map("tenant_id")
+  name         String
+  unit         String
+  currentStock Float         @default(0) @map("current_stock")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([tenantId])
+  @@unique([tenantId, name])
+  @@map("materials")
+}
+
+model Transaction {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  materialId String   @map("material_id")
+  quantity   Float
+  type       String   @default("IN") // IN or OUT
+  createdAt  DateTime @default(now()) @map("created_at")
+  
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([materialId])
+  @@index([createdAt])
+  @@map("transactions")
+}
