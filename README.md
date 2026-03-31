@@ -207,8 +207,8 @@ Running `npm run db:seed` populates the database with realistic sample data:
 
 | Tenant | Plan | Users | Materials |
 |--------|------|-------|-----------|
-| Acme Corp | FREE | alice@acme.com (ADMIN), bob@acme.com (USER) | Steel Rods (kg), Copper Wire (m) |
-| Globex Industries | PRO | carol@globex.com (ADMIN), dave@globex.com (USER) | Aluminium Sheets, Plastic Pellets, Carbon Fiber, Titanium Bolts |
+| Acme Corp | FREE | Alice Johnson - alice@acme.com (ADMIN), Bob Smith - bob@acme.com (USER) | Steel Rods (kg), Copper Wire (m) |
+| Globex Industries | PRO | Carol White - carol@globex.com (ADMIN), Dave Brown - dave@globex.com (USER) | Aluminium Sheets (kg), Plastic Pellets (ton), Carbon Fiber (m), Titanium Bolts (units) |
 
 Each material has a realistic IN/OUT transaction history with stock derived from it. The seed is **idempotent** — re-running it is safe and produces the same result.
 
