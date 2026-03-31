@@ -19,6 +19,7 @@ export const resolveTenant = async (
 
     if (!tenantId) {
       res.status(400).json({
+        success: false,
         error: 'Missing tenant identifier',
         message: 'x-tenant-id header is required'
       });
@@ -32,6 +33,7 @@ export const resolveTenant = async (
 
     if (!tenant) {
       res.status(404).json({
+        success: false,
         error: 'Tenant not found',
         message: `No tenant found with id: ${tenantId}`
       });

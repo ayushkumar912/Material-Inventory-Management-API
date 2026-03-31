@@ -4,6 +4,7 @@ import userRoutes from './routes/user.routes';
 import materialRoutes from './routes/material.routes';
 import transactionRoutes from './routes/transaction.routes';
 import { errorHandler, notFoundHandler } from './middleware/error';
+import prisma from './db/prisma';
 
 const app: Express = express();
 
@@ -11,12 +12,24 @@ const app: Express = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    service: 'material-inventory-api'
+// Health check with DB probe
+app.get('/health', async (_req, res) => {
+  let dbStatus: 'connected' | 'disconnected' = 'connected';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch {
+    dbStatus = 'disconnected';
+  }
+
+  const isHealthy = dbStatus === 'connected';
+  res.status(isHealthy ? 200 : 503).json({
+    success: true,
+    data: {
+      status: isHealthy ? 'ok' : 'degraded',
+      db: dbStatus,
+      timestamp: new Date().toISOString(),
+      service: 'material-inventory-api'
+    }
   });
 });
 

@@ -20,6 +20,11 @@ enum Role {
   USER
 }
 
+enum TransactionType {
+  IN
+  OUT
+}
+
 model Tenant {
   id           String        @id @default(uuid())
   name         String
@@ -71,7 +76,7 @@ model Transaction {
   tenantId   String   @map("tenant_id")
   materialId String   @map("material_id")
   quantity   Float
-  type       String   @default("IN") // IN or OUT
+  type       TransactionType @default(IN)
   createdAt  DateTime @default(now()) @map("created_at")
   
   tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)

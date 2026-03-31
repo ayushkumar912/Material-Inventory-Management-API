@@ -1,39 +1,16 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { userService } from '../services/user.service';
 import { TenantRequest } from '../middleware/tenant';
+import { sendSuccess, sendCreated, sendList, sendMessage } from '../utils/response';
+import { parsePagination, buildMeta } from '../utils/pagination';
 
 export class UserController {
   async createUser(req: TenantRequest, res: Response, next: NextFunction) {
     try {
       const { email, name, role } = req.body;
       const tenantId = req.tenantId!;
-
-      if (!email || !name) {
-        return res.status(400).json({
-          error: 'Validation error',
-          message: 'Email and name are required'
-        });
-      }
-
-      // Validate role if provided
-      if (role && !['ADMIN', 'USER'].includes(role)) {
-        return res.status(400).json({
-          error: 'Validation error',
-          message: 'Role must be either ADMIN or USER'
-        });
-      }
-
-      const user = await userService.createUser({
-        email,
-        name,
-        role: role || 'USER',
-        tenantId
-      });
-
-      res.status(201).json({
-        message: 'User created successfully',
-        data: user
-      });
+      const user = await userService.createUser({ email, name, role: role || 'USER', tenantId });
+      sendCreated(res, user, 'User created successfully');
     } catch (error) {
       next(error);
     }
@@ -42,12 +19,9 @@ export class UserController {
   async getUsers(req: TenantRequest, res: Response, next: NextFunction) {
     try {
       const tenantId = req.tenantId!;
-      const users = await userService.getUsersByTenant(tenantId);
-
-      res.json({
-        data: users,
-        count: users.length
-      });
+      const pagination = parsePagination(req.query);
+      const { data, total } = await userService.getUsersByTenant(tenantId, pagination);
+      sendList(res, data, buildMeta(total, pagination.page, pagination.limit));
     } catch (error) {
       next(error);
     }
@@ -57,17 +31,14 @@ export class UserController {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
-
       const user = await userService.getUserById(id, tenantId);
 
       if (!user) {
-        return res.status(404).json({
-          error: 'User not found or access denied',
-          statusCode: 404
-        });
+        res.status(404).json({ success: false, error: 'User not found or access denied' });
+        return;
       }
 
-      res.json({ data: user });
+      sendSuccess(res, user);
     } catch (error) {
       next(error);
     }
@@ -78,24 +49,8 @@ export class UserController {
       const { id } = req.params;
       const { name, role } = req.body;
       const tenantId = req.tenantId!;
-
-      // Validate role if provided
-      if (role && !['ADMIN', 'USER'].includes(role)) {
-        return res.status(400).json({
-          error: 'Validation error',
-          message: 'Role must be either ADMIN or USER'
-        });
-      }
-
-      const user = await userService.updateUser(id, tenantId, {
-        name,
-        role
-      });
-
-      res.json({
-        message: 'User updated successfully',
-        data: user
-      });
+      const user = await userService.updateUser(id, tenantId, { name, role });
+      sendSuccess(res, user, 'User updated successfully');
     } catch (error) {
       next(error);
     }
@@ -105,12 +60,8 @@ export class UserController {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
-
       await userService.deleteUser(id, tenantId);
-
-      res.json({
-        message: 'User deleted successfully'
-      });
+      sendMessage(res, 'User deleted successfully');
     } catch (error) {
       next(error);
     }

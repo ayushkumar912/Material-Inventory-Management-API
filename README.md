@@ -2,6 +2,8 @@
 
 A multi-tenant REST API for managing material inventory with user management, transaction tracking, and plan-based limits. Built with Node.js, Express, TypeScript, Prisma, and PostgreSQL.
 
+---
+
 ## Architecture Overview
 
 ### System Design
@@ -17,8 +19,9 @@ A multi-tenant REST API for managing material inventory with user management, tr
 │                     Express Application                       │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │         Middleware Layer                               │  │
-│  │  • resolveTenant - Validates tenant & injects context  │  │
-│  │  • errorHandler - Centralizes error responses          │  │
+│  │  • resolveTenant  - Validates tenant & injects context │  │
+│  │  • validateBody   - Zod schema validation on body      │  │
+│  │  • errorHandler   - Centralizes error responses        │  │
 │  └────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │         Routes Layer                                   │  │
@@ -27,29 +30,29 @@ A multi-tenant REST API for managing material inventory with user management, tr
 │  └────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │         Controllers Layer                              │  │
-│  │  • Validate request data                              │  │
 │  │  • Call service methods                               │  │
-│  │  • Format responses                                   │  │
+│  │  • Format responses via response helpers              │  │
+│  │  • Parse pagination query params                      │  │
 │  └────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │         Services Layer                                 │  │
 │  │  • Business logic                                     │  │
 │  │  • Tenant isolation (WHERE tenantId = ?)              │  │
 │  │  • Plan limits enforcement                            │  │
-│  │  • Data validation                                    │  │
+│  │  • Paginated queries with total counts               │  │
 │  └────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │         Prisma ORM Layer                              │  │
 │  │  • Type-safe database queries                         │  │
-│  │  • Transaction support                                │  │
-│  │  • Migrations                                         │  │
+│  │  • Atomic transaction support                         │  │
+│  │  • Migrations + Seed data                            │  │
 │  └────────────────────────────────────────────────────────┘  │
 └────────────────────────────┬─────────────────────────────────┘
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                   PostgreSQL Database                         │
-│  Tables: Tenant, User, Material, Transaction                 │
+│  Tables: tenants, users, materials, transactions             │
 │  Row-Level Isolation: All data scoped by tenantId            │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -65,46 +68,34 @@ A multi-tenant REST API for managing material inventory with user management, tr
    • Extracts tenant ID from header
    • Validates tenant exists in database
    • Attaches tenantId to req.tenantId
-   • Returns 401 if missing/invalid
+   • Returns 400 if missing, 404 if tenant not found
 
-3. Transaction Controller:
-   • Validates quantity > 0
-   • Validates type is "IN" or "OUT"
+3. validateBody Middleware (Zod):
+   • Parses and validates quantity (must be positive number)
+   • Validates type (must be "IN" or "OUT")
+   • Returns 400 with detailed message on failure
+
+4. Transaction Controller:
    • Calls transactionService.createTransaction()
 
-4. Transaction Service:
-   • Verifies material belongs to tenant (materialService.getMaterialById)
+5. Transaction Service:
+   • Verifies material belongs to tenant (getMaterialById)
    • Checks stock sufficiency for OUT transactions
-   • Uses Prisma.$transaction for atomic operation:
+   • Uses prisma.$transaction for atomic operation:
      a) Creates Transaction record
      b) Updates Material.currentStock (+/- quantity)
    • Returns both transaction and updated material
 
-5. Controller formats response:
-   { message: "Transaction created successfully", data: { transaction, material } }
-
-6. Client receives JSON with transaction details and new stock level
+6. Client receives:
+   { "success": true, "message": "Transaction created successfully", "data": { transaction, material } }
 ```
 
 ### Multi-Tenant Isolation Strategy
 
-**Every database query includes `tenantId` filter:**
-- Users can only access their tenant's data
-- Cross-tenant access returns 404 (not 403 to avoid information leakage)
-- Middleware ensures tenant context before any data access
-
-**Example Service Query:**
-```typescript
-// CORRECT: Tenant-scoped query
-const user = await prisma.user.findFirst({
-  where: { id, tenantId }
-});
-
-// WRONG: Would allow cross-tenant access
-const user = await prisma.user.findFirst({
-  where: { id }
-});
-```
+**Every database query includes a `tenantId` filter:**
+- Users can only access their own tenant's data
+- Cross-tenant access returns `404` (not `403`, to avoid information leakage)
+- `resolveTenant` middleware validates the tenant before any route handler runs
 
 ### Plan-Based Limits
 
@@ -114,179 +105,143 @@ const user = await prisma.user.findFirst({
 | Users | Unlimited | Unlimited |
 | Transactions | Unlimited | Unlimited |
 
-**Implementation:** 
-- `materialService.createMaterial()` checks tenant plan before creation
-- Returns 403 error when FREE tenant exceeds 5 materials
+`materialService.createMaterial()` checks the tenant's plan before creation and returns `403` when a FREE tenant exceeds 5 materials.
 
-##  Project Structure
+---
+
+## Project Structure
 
 ```
-codeledger/
+material-inventory-api/
 ├── src/
-│   ├── app.ts                     # Express app configuration
+│   ├── app.ts                     # Express app + health check
 │   ├── server.ts                  # HTTP server entry point
 │   ├── controllers/
-│   │   ├── tenant.controller.ts   # Tenant CRUD handlers
-│   │   ├── user.controller.ts     # User CRUD handlers
-│   │   ├── material.controller.ts # Material CRUD handlers
-│   │   └── transaction.controller.ts # Transaction handlers
+│   │   ├── tenant.controller.ts
+│   │   ├── user.controller.ts
+│   │   ├── material.controller.ts
+│   │   └── transaction.controller.ts
 │   ├── services/
-│   │   ├── tenant.service.ts      # Tenant business logic
-│   │   ├── user.service.ts        # User business logic + email uniqueness
-│   │   ├── material.service.ts    # Material logic + plan limits
-│   │   └── transaction.service.ts # Transaction logic + stock management
+│   │   ├── tenant.service.ts      # Tenant logic + plan limits
+│   │   ├── user.service.ts        # User CRUD + email uniqueness
+│   │   ├── material.service.ts    # Material logic + pagination
+│   │   └── transaction.service.ts # Atomic stock management + pagination
 │   ├── middleware/
-│   │   ├── tenant.ts              # resolveTenant (validates x-tenant-id)
-│   │   └── error.ts               # errorHandler (centralizes errors)
+│   │   ├── tenant.ts              # resolveTenant middleware
+│   │   ├── validate.ts            # validateBody(schema) middleware
+│   │   └── error.ts               # Centralized error handler
 │   ├── routes/
-│   │   ├── tenant.routes.ts       # POST /tenants
-│   │   ├── user.routes.ts         # /users CRUD endpoints
-│   │   ├── material.routes.ts     # /materials CRUD endpoints
-│   │   └── transaction.routes.ts  # /transactions endpoints
+│   │   ├── tenant.routes.ts
+│   │   ├── user.routes.ts
+│   │   ├── material.routes.ts
+│   │   └── transaction.routes.ts
+│   ├── schemas/                   # Zod validation schemas
+│   │   ├── tenant.schema.ts
+│   │   ├── user.schema.ts
+│   │   ├── material.schema.ts
+│   │   └── transaction.schema.ts
+│   ├── utils/
+│   │   ├── response.ts            # sendSuccess / sendCreated / sendList / sendMessage
+│   │   └── pagination.ts          # parsePagination / buildMeta
 │   └── db/
 │       └── prisma.ts              # Prisma client singleton
 ├── prisma/
 │   ├── schema.prisma              # Database schema
+│   ├── seed.ts                    # Seed data (2 tenants, 4 users, 6 materials)
 │   └── migrations/                # Migration history
-├── test-api.sh                    # Complete test suite
+├── test-api.sh                    # Complete test suite (28 tests)
 ├── package.json
 └── tsconfig.json
 ```
 
-##  Setup Instructions
+---
+
+## Setup Instructions
 
 ### Prerequisites
-- Node.js 18+ and npm
+- Node.js 18+
 - PostgreSQL 14+
 - `jq` (for running tests): `brew install jq`
 
 ### Installation
 
-1. **Clone and install dependencies:**
+**1. Clone and install dependencies:**
 ```bash
 git clone <repository-url>
-cd codeledger
+cd material-inventory-api
 npm install
 ```
 
-2. **Configure environment:**
+**2. Configure environment:**
 ```bash
-# Create .env file
-cat > .env << EOF
-DATABASE_URL="postgresql://user:password@localhost:5432/codeledger?schema=public"
+cp .env.example .env
+# Edit .env with your database credentials
+```
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/material_inventory"
 PORT=3000
-EOF
+NODE_ENV=development
 ```
 
-3. **Setup database:**
+**3. Set up the database:**
 ```bash
-# Create database
-createdb codeledger
+# Run migrations (also regenerates the Prisma client)
+npx prisma migrate dev --name init
 
-# Run migrations
-npx prisma migrate dev
-
-# (Optional) Open Prisma Studio to view data
-npx prisma studio
+# Seed with sample data
+npm run db:seed
 ```
 
-4. **Start development server:**
+**4. Start the development server:**
 ```bash
 npm run dev
-# Server runs on http://localhost:3000
+# Server running at http://localhost:3000
 ```
 
-##  Testing
+---
+
+## Seed Data
+
+Running `npm run db:seed` populates the database with realistic sample data:
+
+| Tenant | Plan | Users | Materials |
+|--------|------|-------|-----------|
+| Acme Corp | FREE | alice@acme.com (ADMIN), bob@acme.com (USER) | Steel Rods (kg), Copper Wire (m) |
+| Globex Industries | PRO | carol@globex.com (ADMIN), dave@globex.com (USER) | Aluminium Sheets, Plastic Pellets, Carbon Fiber, Titanium Bolts |
+
+Each material has a realistic IN/OUT transaction history with stock derived from it. The seed is **idempotent** — re-running it is safe and produces the same result.
+
+Use the seeded tenant IDs (printed after seed completes) as your `x-tenant-id` header when testing manually.
+
+---
+
+## Testing
 
 ### Run Complete Test Suite
 ```bash
 ./test-api.sh
 ```
 
-**Output:** Automated tests covering:
-- Health check
+**28 automated tests covering:**
+- Health check (with DB probe)
 - Tenant creation (FREE & PRO plans)
-- User CRUD operations (5 tests)
-- Material CRUD operations
-- Transaction operations (IN/OUT)
+- User CRUD (create, list, get, update, delete)
+- Material CRUD
+- Transaction operations (IN/OUT) with stock tracking
 - Transaction detail retrieval
+- Pagination (`?page=&limit=` on all list endpoints)
 - Multi-tenant isolation (materials & users)
-- Plan limit enforcement
-- Stock validation
-- Header validation
+- Plan limit enforcement (FREE max 5)
+- Zod validation (invalid email, missing fields, invalid enum, zero quantity)
+- Duplicate email → 409 Conflict
+- Insufficient stock → 400
+- Missing tenant header → 400
+- Empty update body → 400
 
-### Manual Testing Examples
+---
 
-**1. Create a tenant:**
-```bash
-curl -X POST http://localhost:3000/tenants \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Acme Corp", "plan": "FREE"}'
-
-# Response:
-{
-  "message": "Tenant created successfully",
-  "data": {
-    "id": "cm52abc...",
-    "name": "Acme Corp",
-    "plan": "FREE",
-    "createdAt": "2024-12-10T...",
-    "updatedAt": "2024-12-10T..."
-  }
-}
-```
-
-**2. Create a user:**
-```bash
-TENANT_ID="cm52abc..." # Use tenant ID from above
-
-curl -X POST http://localhost:3000/users \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: $TENANT_ID" \
-  -d '{"email": "john@acme.com", "name": "John Doe", "role": "ADMIN"}'
-```
-
-**3. Create a material:**
-```bash
-TENANT_ID="cm52abc..." # Use tenant ID from above
-
-curl -X POST http://localhost:3000/materials \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: $TENANT_ID" \
-  -d '{"name": "Steel Rods", "unit": "kg", "currentStock": 100}'
-```
-
-**3. Create a material:**
-```bash
-curl -X POST http://localhost:3000/materials \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: $TENANT_ID" \
-  -d '{"name": "Steel Rods", "unit": "kg", "currentStock": 100}'
-```
-
-**4. Add stock (IN transaction):**
-```bash
-MATERIAL_ID="cm53xyz..." # Use material ID from above
-
-curl -X POST http://localhost:3000/materials/$MATERIAL_ID/transactions \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: $TENANT_ID" \
-  -d '{"quantity": 50, "type": "IN"}'
-
-# Material stock becomes 150
-```
-
-**5. Remove stock (OUT transaction):**
-```bash
-curl -X POST http://localhost:3000/materials/$MATERIAL_ID/transactions \
-  -H "Content-Type: application/json" \
-  -H "x-tenant-id: $TENANT_ID" \
-  -d '{"quantity": 30, "type": "OUT"}'
-
-# Material stock becomes 120
-```
-
-## 📚 API Reference
+## API Reference
 
 ### Base URL
 ```
@@ -296,7 +251,43 @@ http://localhost:3000
 ### Common Headers
 ```
 Content-Type: application/json
-x-tenant-id: <tenant-id>  # Required for all endpoints except /health and /tenants
+x-tenant-id: <tenant-id>   # Required for all endpoints except /health and /tenants
+```
+
+### Response Envelope
+
+All responses share a consistent envelope:
+
+**Success (single resource):**
+```json
+{ "success": true, "data": { ... }, "message": "Optional message" }
+```
+
+**Success (list):**
+```json
+{
+  "success": true,
+  "data": [ ... ],
+  "meta": { "total": 25, "page": 1, "limit": 20, "totalPages": 2 }
+}
+```
+
+**Error:**
+```json
+{ "success": false, "error": "Error type", "message": "Details" }
+```
+
+### Pagination
+
+All list endpoints support query parameters:
+
+| Param | Default | Max | Description |
+|-------|---------|-----|-------------|
+| `page` | `1` | — | Page number (1-based) |
+| `limit` | `20` | `100` | Items per page |
+
+```bash
+GET /materials?page=2&limit=10
 ```
 
 ---
@@ -306,14 +297,31 @@ x-tenant-id: <tenant-id>  # Required for all endpoints except /health and /tenan
 ### Health Check
 
 #### `GET /health`
-Check API status.
+Returns API status and database connectivity.
 
-**Response:**
+**Response (200 — healthy):**
 ```json
 {
-  "status": "ok",
-  "timestamp": "2024-12-10T10:30:00.000Z",
-  "service": "material-inventory-api"
+  "success": true,
+  "data": {
+    "status": "ok",
+    "db": "connected",
+    "timestamp": "2024-12-10T10:30:00.000Z",
+    "service": "material-inventory-api"
+  }
+}
+```
+
+**Response (503 — DB unreachable):**
+```json
+{
+  "success": true,
+  "data": {
+    "status": "degraded",
+    "db": "disconnected",
+    "timestamp": "2024-12-10T10:30:00.000Z",
+    "service": "material-inventory-api"
+  }
 }
 ```
 
@@ -327,18 +335,24 @@ Create a new tenant.
 **Request Body:**
 ```json
 {
-  "name": "Company Name",
-  "plan": "FREE"  // or "PRO"
+  "name": "Acme Corp",
+  "plan": "FREE"
 }
 ```
 
-**Response:**
+| Field | Type | Required | Rules |
+|-------|------|----------|-------|
+| `name` | string | Yes | Max 100 chars |
+| `plan` | `"FREE"` \| `"PRO"` | No | Defaults to `"FREE"` |
+
+**Response (201):**
 ```json
 {
+  "success": true,
   "message": "Tenant created successfully",
   "data": {
     "id": "cm52abc123",
-    "name": "Company Name",
+    "name": "Acme Corp",
     "plan": "FREE",
     "createdAt": "2024-12-10T10:30:00.000Z",
     "updatedAt": "2024-12-10T10:30:00.000Z"
@@ -351,17 +365,13 @@ Create a new tenant.
 #### `GET /tenants/:id`
 Get tenant by ID.
 
-**Request:**
-```bash
-curl -X GET http://localhost:3000/tenants/cm52abc123
-```
-
-**Response:**
+**Response (200):**
 ```json
 {
+  "success": true,
   "data": {
     "id": "cm52abc123",
-    "name": "Company Name",
+    "name": "Acme Corp",
     "plan": "FREE",
     "createdAt": "2024-12-10T10:30:00.000Z",
     "updatedAt": "2024-12-10T10:30:00.000Z"
@@ -381,21 +391,28 @@ Create a new user.
 **Request Body:**
 ```json
 {
-  "email": "user@example.com",
+  "email": "john@acme.com",
   "name": "John Doe",
-  "role": "ADMIN"  // Optional: "ADMIN" or "USER" (default: "USER")
+  "role": "ADMIN"
 }
 ```
 
-**Response:**
+| Field | Type | Required | Rules |
+|-------|------|----------|-------|
+| `email` | string | Yes | Valid email format, max 255 chars, globally unique |
+| `name` | string | Yes | Max 100 chars |
+| `role` | `"ADMIN"` \| `"USER"` | No | Defaults to `"USER"` |
+
+**Response (201):**
 ```json
 {
+  "success": true,
   "message": "User created successfully",
   "data": {
     "id": "cm53user123",
-    "email": "user@example.com",
+    "email": "john@acme.com",
     "name": "John Doe",
-    "role": "USER",
+    "role": "ADMIN",
     "tenantId": "cm52abc123",
     "createdAt": "2024-12-10T10:31:00.000Z",
     "updatedAt": "2024-12-10T10:31:00.000Z"
@@ -403,37 +420,33 @@ Create a new user.
 }
 ```
 
-**Validation:**
-- Email must be globally unique across all tenants
-- Role must be "ADMIN" or "USER"
+**Errors:**
+- `400` — Validation error (invalid email, missing name)
+- `409` — Email already exists
 
 ---
 
 #### `GET /users`
-List all users for tenant.
+List all users for tenant (paginated).
 
 **Headers:** `x-tenant-id` required
 
-**Response:**
+**Query Params:** `page`, `limit`
+
+**Response (200):**
 ```json
 {
+  "success": true,
   "data": [
     {
       "id": "cm53user123",
-      "email": "user@example.com",
+      "email": "john@acme.com",
       "name": "John Doe",
-      "role": "USER",
-      "createdAt": "2024-12-10T10:31:00.000Z"
-    },
-    {
-      "id": "cm53user456",
-      "email": "admin@example.com",
-      "name": "Jane Admin",
       "role": "ADMIN",
-      "createdAt": "2024-12-10T10:32:00.000Z"
+      "createdAt": "2024-12-10T10:31:00.000Z"
     }
   ],
-  "count": 2
+  "meta": { "total": 2, "page": 1, "limit": 20, "totalPages": 1 }
 }
 ```
 
@@ -444,45 +457,51 @@ Get user by ID.
 
 **Headers:** `x-tenant-id` required
 
-**Response:**
+**Response (200):**
 ```json
 {
+  "success": true,
   "data": {
     "id": "cm53user123",
-    "email": "user@example.com",
+    "email": "john@acme.com",
     "name": "John Doe",
-    "role": "USER",
+    "role": "ADMIN",
     "tenantId": "cm52abc123",
     "createdAt": "2024-12-10T10:31:00.000Z"
   }
 }
 ```
 
-**Errors:**
-- `404` - User not found or belongs to different tenant
+**Errors:** `404` — User not found or belongs to a different tenant
 
 ---
 
 #### `PUT /users/:id`
-Update user.
+Update user name and/or role. Email is immutable.
 
 **Headers:** `x-tenant-id` required
 
-**Request Body:**
+**Request Body:** (at least one field required)
 ```json
 {
-  "name": "John Updated",      // Optional
-  "role": "ADMIN"               // Optional: "ADMIN" or "USER"
+  "name": "John Updated",
+  "role": "ADMIN"
 }
 ```
 
-**Response:**
+| Field | Type | Rules |
+|-------|------|-------|
+| `name` | string | Max 100 chars |
+| `role` | `"ADMIN"` \| `"USER"` | — |
+
+**Response (200):**
 ```json
 {
+  "success": true,
   "message": "User updated successfully",
   "data": {
     "id": "cm53user123",
-    "email": "user@example.com",
+    "email": "john@acme.com",
     "name": "John Updated",
     "role": "ADMIN",
     "updatedAt": "2024-12-10T10:35:00.000Z"
@@ -490,7 +509,9 @@ Update user.
 }
 ```
 
-**Note:** Email cannot be updated (immutable)
+**Errors:**
+- `400` — Empty body (at least one field required)
+- `404` — User not found
 
 ---
 
@@ -499,15 +520,12 @@ Delete user.
 
 **Headers:** `x-tenant-id` required
 
-**Response:**
+**Response (200):**
 ```json
-{
-  "message": "User deleted successfully"
-}
+{ "success": true, "message": "User deleted successfully" }
 ```
 
-**Errors:**
-- `404` - User not found or belongs to different tenant
+**Errors:** `404` — User not found
 
 ---
 
@@ -527,9 +545,16 @@ Create a material.
 }
 ```
 
-**Response:**
+| Field | Type | Required | Rules |
+|-------|------|----------|-------|
+| `name` | string | Yes | Max 100 chars, unique per tenant |
+| `unit` | string | Yes | Max 50 chars |
+| `currentStock` | number | No | Non-negative, defaults to `0` |
+
+**Response (201):**
 ```json
 {
+  "success": true,
   "message": "Material created successfully",
   "data": {
     "id": "cm53mat123",
@@ -543,87 +568,74 @@ Create a material.
 }
 ```
 
-**Plan Limits:**
-- FREE: Maximum 5 materials (returns 403 when limit exceeded)
-- PRO: Unlimited
-
-**Validation:**
-- Material name must be unique per tenant
+**Errors:**
+- `400` — Validation error
+- `403` — FREE plan material limit (5) exceeded
+- `409` — Material name already exists for this tenant
 
 ---
 
 #### `GET /materials`
-List all materials for tenant.
+List all materials for tenant (paginated).
 
 **Headers:** `x-tenant-id` required
 
-**Response:**
+**Query Params:** `page`, `limit`
+
+**Response (200):**
 ```json
 {
+  "success": true,
   "data": [
     {
       "id": "cm53mat123",
       "name": "Steel Rods",
       "unit": "kg",
-      "currentStock": 150,
+      "currentStock": 450,
+      "tenantId": "cm52abc123",
       "createdAt": "2024-12-10T10:40:00.000Z",
-      "updatedAt": "2024-12-10T10:40:00.000Z"
-    },
-    {
-      "id": "cm53mat456",
-      "name": "Aluminum Sheets",
-      "unit": "pieces",
-      "currentStock": 75,
-      "createdAt": "2024-12-10T10:41:00.000Z",
-      "updatedAt": "2024-12-10T10:41:00.000Z"
+      "updatedAt": "2024-12-10T10:50:00.000Z"
     }
   ],
-  "count": 2
+  "meta": { "total": 2, "page": 1, "limit": 20, "totalPages": 1 }
 }
 ```
 
 ---
 
 #### `GET /materials/:id`
-Get material with transaction history.
+Get material with full transaction history.
 
 **Headers:** `x-tenant-id` required
 
-**Response:**
+**Response (200):**
 ```json
 {
+  "success": true,
   "data": {
     "id": "cm53mat123",
     "name": "Steel Rods",
     "unit": "kg",
-    "currentStock": 150,
+    "currentStock": 450,
     "tenantId": "cm52abc123",
     "createdAt": "2024-12-10T10:40:00.000Z",
-    "updatedAt": "2024-12-10T10:40:00.000Z",
+    "updatedAt": "2024-12-10T10:50:00.000Z",
     "transactions": [
-      {
-        "id": "cm54txn123",
-        "quantity": 50,
-        "type": "IN",
-        "createdAt": "2024-12-10T10:45:00.000Z"
-      },
-      {
-        "id": "cm54txn456",
-        "quantity": 30,
-        "type": "OUT",
-        "createdAt": "2024-12-10T10:50:00.000Z"
-      }
+      { "id": "cm54txn456", "quantity": 30, "type": "OUT", "createdAt": "2024-12-10T10:50:00.000Z" },
+      { "id": "cm54txn123", "quantity": 500, "type": "IN",  "createdAt": "2024-12-10T10:45:00.000Z" }
     ]
   }
 }
 ```
+
+**Errors:** `404` — Material not found or belongs to a different tenant
 
 ---
 
 ### Transaction Management
 
 #### `POST /materials/:id/transactions`
-Create a stock transaction (add or remove inventory).
+Create a stock transaction (IN to add, OUT to remove). Atomically updates material stock.
 
 **Headers:** `x-tenant-id` required
 
@@ -631,13 +643,19 @@ Create a stock transaction (add or remove inventory).
 ```json
 {
   "quantity": 50,
-  "type": "IN"  // "IN" to add stock, "OUT" to remove
+  "type": "IN"
 }
 ```
 
-**Response:**
+| Field | Type | Required | Rules |
+|-------|------|----------|-------|
+| `quantity` | number | Yes | Must be > 0 |
+| `type` | `"IN"` \| `"OUT"` | Yes | — |
+
+**Response (201):**
 ```json
 {
+  "success": true,
   "message": "Transaction created successfully",
   "data": {
     "transaction": {
@@ -661,25 +679,23 @@ Create a stock transaction (add or remove inventory).
 }
 ```
 
-**Validation:**
-- Quantity must be > 0
-- For OUT transactions: Ensures sufficient stock available
-- Atomic operation: Transaction creation and stock update happen together
-
 **Errors:**
-- `400` - Insufficient stock for OUT transaction
-- `404` - Material not found or belongs to different tenant
+- `400` — Validation error or insufficient stock for OUT transaction
+- `404` — Material not found or belongs to a different tenant
 
 ---
 
 #### `GET /transactions`
-List all transactions for tenant (across all materials).
+List all transactions for tenant across all materials (paginated).
 
 **Headers:** `x-tenant-id` required
 
-**Response:**
+**Query Params:** `page`, `limit`
+
+**Response (200):**
 ```json
 {
+  "success": true,
   "data": [
     {
       "id": "cm54txn123",
@@ -688,38 +704,24 @@ List all transactions for tenant (across all materials).
       "quantity": 50,
       "type": "IN",
       "createdAt": "2024-12-10T10:45:00.000Z",
-      "material": {
-        "name": "Steel Rods",
-        "unit": "kg"
-      }
-    },
-    {
-      "id": "cm54txn456",
-      "tenantId": "cm52abc123",
-      "materialId": "cm53mat123",
-      "quantity": 30,
-      "type": "OUT",
-      "createdAt": "2024-12-10T10:50:00.000Z",
-      "material": {
-        "name": "Steel Rods",
-        "unit": "kg"
-      }
+      "material": { "name": "Steel Rods", "unit": "kg" }
     }
   ],
-  "count": 5
+  "meta": { "total": 8, "page": 1, "limit": 20, "totalPages": 1 }
 }
 ```
 
 ---
 
-#### `GET /transactions/:id` *(NEW)*
-Get single transaction with material details.
+#### `GET /transactions/:id`
+Get a single transaction with material details.
 
 **Headers:** `x-tenant-id` required
 
-**Response:**
+**Response (200):**
 ```json
 {
+  "success": true,
   "data": {
     "id": "cm54txn123",
     "tenantId": "cm52abc123",
@@ -737,60 +739,75 @@ Get single transaction with material details.
 }
 ```
 
-**Use Case:** View transaction details with associated material information
-
-**Errors:**
-- `404` - Transaction not found or belongs to different tenant
+**Errors:** `404` — Transaction not found or belongs to a different tenant
 
 ---
 
-### Security & Validation
+## Validation
 
-### Tenant Isolation
-- All queries filtered by `tenantId`
-- Cross-tenant access returns `404` (not `403`)
-- Middleware validates tenant before any operation
+All request bodies are validated by **Zod schemas** before reaching controllers. Validation errors return:
 
-### Input Validation
-- Required fields enforcement
-- Transaction type validation (must be "IN" or "OUT")
-- Positive number validation (stock, quantity)
-- Unique constraints (material names per tenant, emails globally)
-
-### Error Handling
-- Centralized error middleware
-- Consistent error response format:
 ```json
 {
-  "error": "Error type",
-  "message": "Error description",
-  "statusCode": 400
+  "success": false,
+  "error": "Validation error",
+  "message": "Invalid email format, Name is required and cannot be empty"
 }
 ```
 
-##  Tech Stack
+| Schema | Rules |
+|--------|-------|
+| `createTenantSchema` | `name` max 100, `plan` enum |
+| `createUserSchema` | `email` format + max 255, `name` max 100, `role` enum |
+| `updateUserSchema` | At least one of `name` or `role` required |
+| `createMaterialSchema` | `name` max 100, `unit` max 50, `currentStock` non-negative |
+| `createTransactionSchema` | `quantity` positive, `type` enum |
 
-- **Runtime:** Node.js 18+
-- **Framework:** Express 4.18.2
-- **Language:** TypeScript 5.3.3
-- **Database:** PostgreSQL 14+
-- **ORM:** Prisma 5.22
-- **Dev Tools:** tsx (hot reload)
+---
 
-##  Database Schema
+## Error Reference
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Validation error (Zod), business logic failure (insufficient stock) |
+| `403` | Plan limit exceeded |
+| `404` | Resource not found or tenant isolation violation |
+| `409` | Duplicate entry (email, material name per tenant) |
+| `503` | Health check — database unreachable |
+| `500` | Unexpected server error |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Runtime | Node.js 18+ |
+| Framework | Express 4.18 |
+| Language | TypeScript 5.3 |
+| Validation | Zod 4 |
+| ORM | Prisma 5.22 |
+| Database | PostgreSQL 14+ |
+| Dev server | tsx (hot reload) |
+
+---
+
+## Database Schema
 
 ```prisma
+enum Plan            { FREE PRO }
+enum Role            { ADMIN USER }
+enum TransactionType { IN OUT }
+
 model Tenant {
-  id           String        @id @default(uuid())
-  name         String
-  plan         Plan          @default(FREE)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  
+  id        String   @id @default(uuid())
+  name      String
+  plan      Plan     @default(FREE)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
   users        User[]
   materials    Material[]
   transactions Transaction[]
-
   @@map("tenants")
 }
 
@@ -801,100 +818,87 @@ model User {
   name      String
   role      Role     @default(USER)
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  
+  updatedAt DateTime @updatedAt      @map("updated_at")
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
   @@index([tenantId])
   @@map("users")
 }
 
 model Material {
-  id           String        @id @default(uuid())
-  tenantId     String        @map("tenant_id")
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
   name         String
   unit         String
-  currentStock Float         @default(0) @map("current_stock")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  
+  currentStock Float    @default(0) @map("current_stock")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt      @map("updated_at")
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   transactions Transaction[]
-
   @@index([tenantId])
   @@unique([tenantId, name])
   @@map("materials")
 }
 
 model Transaction {
-  id         String   @id @default(uuid())
-  tenantId   String   @map("tenant_id")
-  materialId String   @map("material_id")
+  id         String          @id @default(uuid())
+  tenantId   String          @map("tenant_id")
+  materialId String          @map("material_id")
   quantity   Float
-  type       String   @default("IN") // "IN" or "OUT"
-  createdAt  DateTime @default(now()) @map("created_at")
-  
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type       TransactionType @default(IN)
+  createdAt  DateTime        @default(now()) @map("created_at")
+  tenant     Tenant   @relation(fields: [tenantId],   references: [id], onDelete: Cascade)
   material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
-
   @@index([tenantId])
   @@index([materialId])
   @@index([createdAt])
   @@map("transactions")
 }
-
-enum Plan { FREE PRO }
-enum Role { ADMIN USER }
 ```
 
-##  Troubleshooting
+---
 
-### Common Issues
+## Development Scripts
 
-**1. Database connection error:**
 ```bash
-# Check PostgreSQL is running
-pg_isready
+npm run dev              # Start server with hot reload
+npm run build            # Compile TypeScript → dist/
+npm start                # Run compiled build
 
-# Verify DATABASE_URL in .env
-# Format: postgresql://user:password@localhost:5432/dbname
+npm run db:seed          # Seed database with sample data
+npm run prisma:migrate   # Create and apply a new migration
+npm run prisma:generate  # Regenerate Prisma client
+npm run prisma:studio    # Open Prisma Studio (DB GUI)
+npm run db:push          # Push schema changes without a migration
 ```
 
-**2. Migration errors:**
-```bash
-# Reset database (WARNING: deletes all data)
-npx prisma migrate reset
+---
 
-# Or create new migration
-npx prisma migrate dev --name fix_name
+## Troubleshooting
+
+**Database connection error:**
+```bash
+pg_isready   # Check PostgreSQL is running
+# Verify DATABASE_URL format: postgresql://user:password@localhost:5432/dbname
 ```
 
-**3. Port already in use:**
+**Reset database and re-seed:**
 ```bash
-# Change PORT in .env or kill process
+npx prisma migrate reset   # WARNING: deletes all data, re-runs migrations and seed
+```
+
+**Port already in use:**
+```bash
 lsof -ti:3000 | xargs kill -9
 ```
 
-**4. TypeScript errors:**
+**Prisma type errors after schema change:**
 ```bash
-# Regenerate Prisma client
+npx prisma migrate dev --name <migration_name>   # runs generate automatically
+# or manually:
 npx prisma generate
-
-# Clear build cache
-rm -rf node_modules dist
-npm install
 ```
 
-## 📝 Development Scripts
-
+**Clear build and reinstall:**
 ```bash
-npm run dev         # Start development server (hot reload)
-npm run build       # Compile TypeScript to JavaScript
-npm start           # Run production build
-npm run lint        # Run ESLint
-npx prisma studio   # Open database GUI
-npx prisma migrate dev  # Create/apply migrations
+rm -rf node_modules dist && npm install
 ```
-
-
-

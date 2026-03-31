@@ -1,99 +1,38 @@
 import { Response, NextFunction } from 'express';
 import { TenantRequest } from '../middleware/tenant';
 import materialService from '../services/material.service';
+import { sendSuccess, sendCreated, sendList } from '../utils/response';
+import { parsePagination, buildMeta } from '../utils/pagination';
 
 export class MaterialController {
-  /**
-   * POST /materials - Create a new material (tenant-scoped)
-   */
-  async createMaterial(
-    req: TenantRequest,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
+  async createMaterial(req: TenantRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { name, unit, currentStock } = req.body;
       const tenantId = req.tenantId!;
-
-      // Validation
-      if (!name || typeof name !== 'string' || name.trim().length === 0) {
-        res.status(400).json({
-          error: 'Validation error',
-          message: 'Name is required and must be a non-empty string'
-        });
-        return;
-      }
-
-      if (!unit || typeof unit !== 'string' || unit.trim().length === 0) {
-        res.status(400).json({
-          error: 'Validation error',
-          message: 'Unit is required and must be a non-empty string'
-        });
-        return;
-      }
-
-      if (currentStock !== undefined && (typeof currentStock !== 'number' || currentStock < 0)) {
-        res.status(400).json({
-          error: 'Validation error',
-          message: 'Current stock must be a non-negative number'
-        });
-        return;
-      }
-
-      const material = await materialService.createMaterial(tenantId, {
-        name: name.trim(),
-        unit: unit.trim(),
-        currentStock: currentStock || 0
-      });
-
-      res.status(201).json({
-        message: 'Material created successfully',
-        data: material
-      });
+      const material = await materialService.createMaterial(tenantId, { name, unit, currentStock });
+      sendCreated(res, material, 'Material created successfully');
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * GET /materials - List all materials for tenant
-   */
-  async getMaterials(
-    req: TenantRequest,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
+  async getMaterials(req: TenantRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const tenantId = req.tenantId!;
-
-      const materials = await materialService.getMaterialsByTenant(tenantId);
-
-      res.status(200).json({
-        data: materials,
-        count: materials.length
-      });
+      const pagination = parsePagination(req.query);
+      const { data, total } = await materialService.getMaterialsByTenant(tenantId, pagination);
+      sendList(res, data, buildMeta(total, pagination.page, pagination.limit));
     } catch (error) {
       next(error);
     }
   }
 
-  /**
-   * GET /materials/:id - Get material by ID with transactions (tenant-scoped)
-   */
-  async getMaterialById(
-    req: TenantRequest,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
+  async getMaterialById(req: TenantRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
       const tenantId = req.tenantId!;
-
       const material = await materialService.getMaterialById(tenantId, id);
-
-      res.status(200).json({
-        data: material
-      });
+      sendSuccess(res, material);
     } catch (error) {
       next(error);
     }

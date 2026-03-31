@@ -1,6 +1,7 @@
 import prisma from '../db/prisma';
 import { AppError } from '../middleware/error';
 import materialService from './material.service';
+import { PaginationParams } from '../utils/pagination';
 
 export interface CreateTransactionDto {
   quantity: number;
@@ -8,120 +9,71 @@ export interface CreateTransactionDto {
 }
 
 export class TransactionService {
-  /**
-   * Create a transaction (IN/OUT) and update material stock atomically
-   * Enforces tenant isolation - cannot create transactions for other tenants' materials
-   */
-  async createTransaction(
-    tenantId: string,
-    materialId: string,
-    data: CreateTransactionDto
-  ) {
-    // Verify material belongs to tenant
+  async createTransaction(tenantId: string, materialId: string, data: CreateTransactionDto) {
     const material = await materialService.getMaterialById(tenantId, materialId);
 
-    // Calculate new stock
     let newStock = material.currentStock;
-    
+
     if (data.type === 'IN') {
       newStock += data.quantity;
-    } else if (data.type === 'OUT') {
+    } else {
       newStock -= data.quantity;
-      
-      // Prevent negative stock
+
       if (newStock < 0) {
         throw new AppError(
           `Insufficient stock. Available: ${material.currentStock}, Requested: ${data.quantity}`,
           400
         );
       }
-    } else {
-      throw new AppError('Invalid transaction type. Must be IN or OUT', 400);
     }
 
-    // Use transaction to ensure atomicity
     const result = await prisma.$transaction(async (tx) => {
-      // Create transaction record
       const transaction = await tx.transaction.create({
-        data: {
-          tenantId,
-          materialId,
-          quantity: data.quantity,
-          type: data.type
-        }
+        data: { tenantId, materialId, quantity: data.quantity, type: data.type }
       });
 
-      // Update material stock
       const updatedMaterial = await tx.material.update({
         where: { id: materialId },
         data: { currentStock: newStock }
       });
 
-      return {
-        transaction,
-        material: updatedMaterial
-      };
+      return { transaction, material: updatedMaterial };
     });
 
     return result;
   }
 
-  /**
-   * Get all transactions for a tenant
-   */
-  async getTransactionsByTenant(tenantId: string) {
-    const transactions = await prisma.transaction.findMany({
-      where: { tenantId },
-      include: {
-        material: {
-          select: {
-            name: true,
-            unit: true
-          }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+  async getTransactionsByTenant(tenantId: string, pagination: PaginationParams) {
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({
+        where: { tenantId },
+        include: { material: { select: { name: true, unit: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: pagination.skip,
+        take: pagination.limit
+      }),
+      prisma.transaction.count({ where: { tenantId } })
+    ]);
 
-    return transactions;
+    return { data: transactions, total };
   }
 
-  /**
-   * Get transactions for a specific material (tenant-scoped)
-   */
   async getTransactionsByMaterial(tenantId: string, materialId: string) {
-    // Verify material belongs to tenant
     await materialService.getMaterialById(tenantId, materialId);
 
     const transactions = await prisma.transaction.findMany({
-      where: {
-        tenantId,
-        materialId
-      },
+      where: { tenantId, materialId },
       orderBy: { createdAt: 'desc' }
     });
 
     return transactions;
   }
 
-  /**
-   * Get a specific transaction by ID (tenant-scoped)
-   */
   async getTransactionById(tenantId: string, transactionId: string) {
     const transaction = await prisma.transaction.findFirst({
-      where: {
-        id: transactionId,
-        tenantId
-      },
+      where: { id: transactionId, tenantId },
       include: {
-        material: {
-          select: {
-            id: true,
-            name: true,
-            unit: true,
-            currentStock: true
-          }
-        }
+        material: { select: { id: true, name: true, unit: true, currentStock: true } }
       }
     });
 
